@@ -85,6 +85,38 @@ async def download_attachment(
     return FileResponse(path=stored_path, media_type=mime_type, filename=filename)
 
 
+@router.get("/attachments/generated/{user_id}/{filename}")
+async def download_generated_image(
+    user_id: str,
+    filename: str,
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Download a generated image."""
+    from pathlib import Path
+    from app.core.config import settings
+    
+    # Verify user is accessing their own generated images
+    if user_id != str(current_user.id):
+        raise HTTPException(status_code=403, detail={"error": "forbidden", "message": "Access denied"})
+    
+    # Construct safe file path
+    file_path = Path(settings.UPLOAD_DIR) / "generated" / user_id / filename
+    
+    # Verify the file exists and is within the expected directory
+    try:
+        file_path = file_path.resolve()
+        expected_dir = (Path(settings.UPLOAD_DIR) / "generated" / user_id).resolve()
+        if not str(file_path).startswith(str(expected_dir)):
+            raise HTTPException(status_code=403, detail={"error": "forbidden", "message": "Invalid file path"})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail={"error": "invalid_path", "message": str(e)})
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Generated image not found"})
+    
+    return FileResponse(path=str(file_path), media_type="image/png", filename=filename)
+
+
 @router.post("/stream")
 async def stream_chat(
     payload: ChatRequest,
@@ -111,10 +143,23 @@ async def generate_image(
     current_user: User = Depends(get_current_user),
 ) -> ImageGenerationResponse:
     """Generate an image using Gemini image generation model."""
-    image_service = get_image_service()
-    result = await image_service.generate_image(
-        prompt=payload.prompt,
-        user_email=current_user.email,
-        user_id=str(current_user.id),
-    )
-    return ImageGenerationResponse(**result)
+    try:
+        image_service = get_image_service()
+        result = await image_service.generate_image(
+            prompt=payload.prompt,
+            user_email=current_user.email,
+            user_id=str(current_user.id),
+        )
+        return ImageGenerationResponse(**result)
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Image generation error: {error_msg}")
+        if "connection" in error_msg.lower() or "connect" in error_msg.lower():
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "service_unavailable", "message": "Image generation service is unavailable. Please check VPN connection."},
+            )
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "image_generation_failed", "message": f"Image generation failed: {error_msg}"},
+        )

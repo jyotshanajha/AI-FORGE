@@ -16,3 +16,6 @@ langchain-openai==0.3.19
 langchain-core==0.3.66
 authlib==1.5.2
 chromadb==1.0.12
+pypdf==5.2.0
+psycopg2-binary==2.9.10
+gspread==6.1.0

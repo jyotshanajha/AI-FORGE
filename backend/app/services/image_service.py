@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import requests
 from openai import OpenAI
 
 from app.core.config import settings
@@ -47,6 +48,10 @@ class ImageService:
         filepath = user_dir / filename
 
         try:
+            print(f"[ImageService] Generating image with prompt: {prompt}")
+            print(f"[ImageService] Using model: {settings.IMAGE_GEN_MODEL}")
+            print(f"[ImageService] LiteLLM proxy: {settings.LITELLM_PROXY_URL}")
+            
             # Call Gemini image generation via LiteLLM
             response = self.client.images.generate(
                 model=settings.IMAGE_GEN_MODEL,
@@ -64,13 +69,36 @@ class ImageService:
                 },
             )
 
+            print(f"[ImageService] Response received: {type(response)}")
+            print(f"[ImageService] Response data: {response.data}")
+            
             # Extract base64 image data
-            image_base64 = response.data[0].b64_json
+            if hasattr(response.data[0], 'b64_json'):
+                image_base64 = response.data[0].b64_json
+            elif hasattr(response.data[0], 'url'):
+                # If URL response, download the image
+                img_response = requests.get(response.data[0].url)
+                image_bytes = img_response.content
+                with open(filepath, "wb") as f:
+                    f.write(image_bytes)
+                return {
+                    "url": f"/api/chat/attachments/generated/{user_id}/{filename}",
+                    "filename": filename,
+                    "mime_type": "image/png",
+                    "original_prompt": prompt,
+                    "size_bytes": len(image_bytes),
+                }
+            else:
+                raise ValueError(f"Unexpected response format: {response.data[0]}")
 
+            print(f"[ImageService] Decoding base64 image...")
+            
             # Decode and save to disk
-            image_bytes = base64.standard_b64_decode(image_base64)
+            image_bytes = base64.b64decode(image_base64)
             with open(filepath, "wb") as f:
                 f.write(image_bytes)
+
+            print(f"[ImageService] Image saved to {filepath} ({len(image_bytes)} bytes)")
 
             # Return metadata
             return {
@@ -82,6 +110,9 @@ class ImageService:
             }
 
         except Exception as e:
+            print(f"[ImageService] ERROR: {str(e)}")
+            import traceback
+            traceback.print_exc()
             raise Exception(f"Image generation failed: {str(e)}")
 
 

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Box, TextField, Button, CircularProgress, Chip, Typography, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
+import { Box, TextField, Button, CircularProgress, Chip, Typography, Dialog, DialogTitle, DialogContent, DialogActions, Alert } from '@mui/material'
 import SendIcon from '@mui/icons-material/Send'
 import AttachFileIcon from '@mui/icons-material/AttachFile'
 import ImageIcon from '@mui/icons-material/Image'
@@ -73,9 +73,9 @@ export function InputBar({ onSend, disabled, threadId }: InputBarProps) {
       )}
 
       {uploadError && (
-        <Typography variant="caption" color="error" sx={{ display: 'block', mb: 1 }}>
+        <Alert severity="error" onClose={() => setUploadError(null)} sx={{ mb: 1 }}>
           {uploadError}
-        </Typography>
+        </Alert>
       )}
 
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
