@@ -7,9 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.chains.chat_chain import stream_chat_response
+from app.core.config import settings
 from app.models.message import Message
 from app.models.thread import Thread
 from app.models.user import User
+from app.services.attachment_service import AttachmentService
 from app.services.fallback_store import get_store, update_store
 from app.services.thread_service import ThreadService
 
@@ -20,6 +22,12 @@ class ChatService:
     @staticmethod
     def _now_utc() -> datetime:
         return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _limit_history(messages: list[Message]) -> list[Message]:
+        # Keep only the previous N user/assistant turns (2 messages per turn).
+        message_limit = max(1, settings.CHAT_MEMORY_CONVERSATION_LIMIT) * 2
+        return messages[-message_limit:]
 
     @staticmethod
     def _load_messages_from_store() -> None:
@@ -96,14 +104,16 @@ class ChatService:
         user: User,
         thread_id: uuid.UUID,
         user_message: str,
+        attachment_ids: list[uuid.UUID] | None = None,
     ) -> AsyncGenerator[str, None]:
         thread = await ThreadService.get_thread_or_404(db, user, thread_id)
 
+        clean_message = user_message.strip()
         user_record = Message(
             id=uuid.uuid4(),
             thread_id=thread.id,
             role="user",
-            content=user_message,
+            content=clean_message,
             created_at=ChatService._now_utc(),
         )
 
@@ -121,10 +131,37 @@ class ChatService:
             ChatService._persist_messages_to_store()
             history_records = thread_messages
 
-        history = [{"role": m.role, "content": m.content} for m in history_records[:-1]]
+        bound_attachments = AttachmentService.bind_attachments_to_message(
+            user.id,
+            attachment_ids or [],
+            user_record.id,
+        )
+
+        limited_history_records = ChatService._limit_history(history_records[:-1])
+        history = [{"role": m.role, "content": m.content} for m in limited_history_records]
+
+        prompt_message = clean_message or "Please analyze the attached files and respond."
+        if bound_attachments:
+            lines = [
+                f"- {item['filename']} ({item['attachment_type']}, {item['mime_type']}, {item['size_bytes']} bytes)"
+                for item in bound_attachments
+            ]
+            prompt_message = f"{prompt_message}\n\nAttached files:\n" + "\n".join(lines)
+
+        # Retrieve RAG context from uploaded documents
+        try:
+            from app.services.rag_service import get_rag_service
+            rag = get_rag_service()
+            rag_context = await rag.retrieve_context(str(user.id), clean_message, top_k=5)
+            if rag_context:
+                context_text = "\n\n".join(rag_context)
+                prompt_message += f"\n\nContext from your documents:\n{context_text}"
+        except Exception:
+            # If RAG retrieval fails, continue without context
+            pass
 
         chunks: list[str] = []
-        async for chunk in stream_chat_response(user_message, history, user.email):
+        async for chunk in stream_chat_response(prompt_message, history, user.email):
             chunks.append(chunk)
             yield chunk
 

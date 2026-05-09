@@ -35,6 +35,21 @@ class Settings(BaseSettings):
     GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None
     MAX_UPLOAD_MB: int = 20
     UPLOAD_DIR: str = "./uploads"
+    CHAT_MEMORY_CONVERSATION_LIMIT: int = 5
+    ALLOWED_ATTACHMENT_MIME_TYPES: str = (
+        "image/jpeg,image/png,image/webp,image/gif,"
+        "video/mp4,video/webm,video/quicktime,"
+        "text/plain,text/csv,text/markdown,application/json,"
+        "application/pdf,application/x-tex,text/x-tex,application/octet-stream,"
+        "application/vnd.ms-excel,"
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+        "text/x-python,application/javascript,text/javascript"
+    )
+
+    @property
+    def allowed_attachment_mime_types(self) -> set[str]:
+        values = [item.strip().lower() for item in self.ALLOWED_ATTACHMENT_MIME_TYPES.split(",")]
+        return {item for item in values if item}
 
 
 @lru_cache(maxsize=1)

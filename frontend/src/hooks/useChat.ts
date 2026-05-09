@@ -9,7 +9,7 @@ import {
   renameThread,
   streamChat,
 } from '../lib/api'
-import type { Message } from '../types/api'
+import type { ChatAttachment, Message } from '../types/api'
 
 export function useChat(activeThreadId: string | null) {
   const queryClient = useQueryClient()
@@ -48,8 +48,12 @@ export function useChat(activeThreadId: string | null) {
     },
   })
 
-  const sendMessage = async (threadId: string, message: string): Promise<void> => {
-    if (!threadId || !message.trim()) {
+  const sendMessage = async (
+    threadId: string,
+    message: string,
+    attachments: ChatAttachment[] = [],
+  ): Promise<void> => {
+    if (!threadId || (!message.trim() && attachments.length === 0)) {
       return
     }
 
@@ -59,6 +63,7 @@ export function useChat(activeThreadId: string | null) {
       role: 'user',
       content: message,
       created_at: new Date().toISOString(),
+      attachments,
     }
 
     const optimisticAssistant: Message = {
@@ -67,6 +72,7 @@ export function useChat(activeThreadId: string | null) {
       role: 'assistant',
       content: '',
       created_at: new Date().toISOString(),
+      attachments: [],
     }
 
     queryClient.setQueryData(['messages', threadId], (previous: Message[] | undefined) => {
@@ -75,17 +81,22 @@ export function useChat(activeThreadId: string | null) {
 
     setIsStreaming(true)
     try {
-      await streamChat(threadId, message, ({ token }) => {
-        queryClient.setQueryData(['messages', threadId], (previous: Message[] | undefined) => {
-          if (!previous || previous.length === 0) {
-            return previous
-          }
-          const updated = [...previous]
-          const last = updated[updated.length - 1]
-          updated[updated.length - 1] = { ...last, content: `${last.content}${token}` }
-          return updated
-        })
-      })
+      await streamChat(
+        threadId,
+        message,
+        ({ token }) => {
+          queryClient.setQueryData(['messages', threadId], (previous: Message[] | undefined) => {
+            if (!previous || previous.length === 0) {
+              return previous
+            }
+            const updated = [...previous]
+            const last = updated[updated.length - 1]
+            updated[updated.length - 1] = { ...last, content: `${last.content}${token}` }
+            return updated
+          })
+        },
+        attachments.map((attachment) => attachment.id),
+      )
       await queryClient.invalidateQueries({ queryKey: ['messages', threadId] })
       await queryClient.invalidateQueries({ queryKey: ['threads'] })
     } finally {

@@ -129,21 +129,22 @@ export default function ChatPage() {
           <MessageList messages={messages} isStreaming={isStreaming} />
 
           <InputBar
-            onSend={async (value) => {
+            onSend={async ({ message, attachments }) => {
               try {
                 setError(null)
                 if (!resolvedActiveThreadId) {
                   const created = await createThreadMutation.mutateAsync()
                   setActiveThreadId(created.id)
-                  await sendMessage(created.id, value)
+                  await sendMessage(created.id, message, attachments)
                   return
                 }
-                await sendMessage(resolvedActiveThreadId, value)
+                await sendMessage(resolvedActiveThreadId, message, attachments)
               } catch (err) {
                 setError(err instanceof Error ? err.message : 'Failed to send message')
               }
             }}
             disabled={isStreaming}
+            threadId={resolvedActiveThreadId ?? undefined}
           />
         </Box>
       </Box>

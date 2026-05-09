@@ -17,12 +17,22 @@ export interface Thread {
   updated_at: string
 }
 
+export interface ChatAttachment {
+  id: string
+  filename: string
+  mime_type: string
+  size_bytes: number
+  attachment_type: string
+  download_url: string
+}
+
 export interface Message {
   id: string
   thread_id: string
   role: Role
   content: string
   created_at: string
+  attachments: ChatAttachment[]
 }
 
 export interface ChatTokenEvent {

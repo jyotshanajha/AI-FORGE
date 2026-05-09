@@ -66,7 +66,28 @@ export function MessageList({ messages, isStreaming }: MessageListProps) {
                   },
                 }}
               >
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                {message.content && <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>}
+
+                {message.attachments.length > 0 && (
+                  <Box sx={{ mt: message.content ? 1.5 : 0 }}>
+                    <Typography variant="caption" sx={{ opacity: 0.8, display: 'block', mb: 0.5 }}>
+                      Attachments
+                    </Typography>
+                    <Stack spacing={0.5}>
+                      {message.attachments.map((attachment) => (
+                        <a
+                          key={attachment.id}
+                          href={attachment.download_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: 'inherit', textDecoration: 'underline', fontSize: '0.85rem' }}
+                        >
+                          {attachment.filename} ({attachment.attachment_type})
+                        </a>
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
               </Box>
             </Paper>
           )
