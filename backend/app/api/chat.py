@@ -17,6 +17,12 @@ from app.services.image_service import get_image_service
 router = APIRouter()
 
 
+@router.post("/debug-test")
+async def debug_test(payload: dict = None) -> dict:
+    """Debug endpoint to test routing."""
+    return {"status": "ok", "message": "Debug endpoint working"}
+
+
 @router.get("/{thread_id}/messages", response_model=list[MessageResponse])
 async def get_messages(
     thread_id: uuid.UUID,
