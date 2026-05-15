@@ -5,12 +5,27 @@ from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user
 from app.models.user import User
-from app.schemas.agents import ResearchDigestRequest, TicTacToeMoveRequest, TicTacToeMoveResponse
+from app.schemas.agents import (
+    DataframeQueryRequest,
+    DataframeQueryResponse,
+    ResearchDigestRequest,
+    TicTacToeMoveRequest,
+    TicTacToeMoveResponse,
+)
+from app.services.dataframe_query_service import DataframeQueryService
 from app.services.research_digest_service import ResearchDigestService
 from app.services.tic_tac_toe_service import TicTacToeService
 
 
 router = APIRouter()
+
+
+@router.post("/dataframe-query", response_model=DataframeQueryResponse)
+async def dataframe_query(
+    payload: DataframeQueryRequest,
+    current_user: User = Depends(get_current_user),
+) -> DataframeQueryResponse:
+    return DataframeQueryService.answer_question(payload, current_user)
 
 
 @router.post("/research-digest/stream")
