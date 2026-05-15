@@ -3,7 +3,6 @@ import asyncio
 import json
 import re
 import uuid
-from pathlib import Path
 from typing import Any
 
 import gspread
@@ -15,6 +14,7 @@ from app.core.config import settings
 from app.models.user import User
 from app.schemas.agents import DataframeQueryRequest, DataframeQueryResponse
 from app.services.attachment_service import AttachmentService
+from app.services.sheets_service import load_sheet_as_dataframe
 
 
 DATAFRAME_AGENT_PROMPT = """You are a dataframe query agent.
@@ -273,34 +273,8 @@ class DataframeQueryService:
 
     @staticmethod
     def _load_from_google_sheet(google_sheet_id: str, worksheet_name: str | None) -> tuple[pd.DataFrame, str, str]:
-        client = DataframeQueryService._build_gspread_client()
-        sheet_key = DataframeQueryService._extract_google_sheet_key(google_sheet_id)
-
-        try:
-            spreadsheet = client.open_by_key(sheet_key)
-            worksheet = spreadsheet.worksheet(worksheet_name) if worksheet_name else spreadsheet.get_worksheet(0)
-            if worksheet is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail={"error": "worksheet_not_found", "message": "Worksheet not found"},
-                )
-            values = worksheet.get_all_values()
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail={"error": "google_sheet_load_failed", "message": str(exc)},
-            ) from exc
-
-        if not values:
-            return pd.DataFrame(), "google_sheet", spreadsheet.title
-
-        headers = values[0]
-        rows = values[1:] if len(values) > 1 else []
-        dataframe = pd.DataFrame(rows, columns=headers)
-        source_name = f"{spreadsheet.title}:{worksheet.title}"
-        return dataframe.fillna(""), "google_sheet", source_name
+        dataframe = load_sheet_as_dataframe(google_sheet_id, worksheet_name)
+        return dataframe, "google_sheet", google_sheet_id
 
     @staticmethod
     def _build_gspread_client() -> gspread.Client:
@@ -311,10 +285,6 @@ class DataframeQueryService:
                 detail={"error": "google_sheets_unavailable", "message": "GOOGLE_SERVICE_ACCOUNT_JSON is not configured"},
             )
 
-        path_candidate = Path(raw_value)
-        if path_candidate.exists():
-            return gspread.service_account(filename=str(path_candidate))
-
         try:
             credentials = json.loads(raw_value)
         except json.JSONDecodeError as exc:
@@ -322,7 +292,7 @@ class DataframeQueryService:
                 status_code=500,
                 detail={
                     "error": "invalid_google_service_account",
-                    "message": "GOOGLE_SERVICE_ACCOUNT_JSON must be a file path or JSON payload",
+                    "message": "GOOGLE_SERVICE_ACCOUNT_JSON must be a full JSON string, not a file path.",
                 },
             ) from exc
 
