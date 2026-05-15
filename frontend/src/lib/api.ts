@@ -5,6 +5,7 @@ import type {
   ChatAttachment,
   ChatResponseMode,
   ChatTokenEvent,
+  DataframeQueryResponse,
   Message,
   ResearchDigestTokenEvent,
   Thread,
@@ -62,6 +63,17 @@ const imageGenerationResponseSchema = z.object({
   attachment: attachmentSchema,
   original_prompt: z.string(),
   message_id: z.string().optional().nullable(),
+})
+
+const dataframeQueryResponseSchema = z.object({
+  answer: z.string(),
+  source_type: z.string(),
+  source_name: z.string(),
+  row_count: z.number(),
+  column_count: z.number(),
+  columns: z.array(z.string()),
+  generated_code: z.string().nullable().optional(),
+  intermediate_steps: z.array(z.string()).default([]),
 })
 
 export interface GeneratedImageResult {
@@ -322,6 +334,24 @@ export async function streamResearchDigest(
       onToken(parsed)
     }
   }
+}
+
+export async function dataframeQuery(input: {
+  question: string
+  attachmentId?: string
+  googleSheetId?: string
+  worksheetName?: string
+}): Promise<DataframeQueryResponse> {
+  const payload = await request<DataframeQueryResponse>('/agents/dataframe-query', {
+    method: 'POST',
+    body: JSON.stringify({
+      question: input.question,
+      attachment_id: input.attachmentId,
+      google_sheet_id: input.googleSheetId,
+      worksheet_name: input.worksheetName,
+    }),
+  })
+  return dataframeQueryResponseSchema.parse(payload)
 }
 
 export async function ticTacToeMove(board: string[], playerMove: number): Promise<TicTacToeMoveResponse> {

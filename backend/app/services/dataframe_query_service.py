@@ -1,3 +1,5 @@
+import ast
+import asyncio
 import json
 import re
 import uuid
@@ -7,7 +9,6 @@ from typing import Any
 import gspread
 import pandas as pd
 from fastapi import HTTPException
-from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
 
 from app.ai.llm import llm
 from app.core.config import settings
@@ -16,34 +17,76 @@ from app.schemas.agents import DataframeQueryRequest, DataframeQueryResponse
 from app.services.attachment_service import AttachmentService
 
 
+DATAFRAME_AGENT_PROMPT = """You are a dataframe query agent.
+You must produce JSON only with this exact shape:
+{
+  \"pandas_expression\": \"<single Python expression>\",
+  \"explanation\": \"<short explanation>\"
+}
+
+Rules:
+- The expression must be a single Python expression, not statements.
+- Use only the variables df and pd.
+- Never use imports, file access, network calls, subprocesses, or OS access.
+- Never use eval, exec, open, compile, globals, locals, vars, __import__, or dunder attributes.
+- Prefer concise pandas expressions that directly answer the question.
+- If the question asks for metadata like row count or columns, use pandas expressions for that.
+- Return valid JSON only. No markdown fences.
+"""
+
+ANSWER_SYNTHESIS_PROMPT = """You are summarizing the result of a dataframe query for an end user.
+Use only the executed dataframe result and metadata provided.
+Be concise, accurate, and explicit when the result is empty.
+"""
+
+BLOCKED_NAMES = {
+    "__import__",
+    "compile",
+    "eval",
+    "exec",
+    "globals",
+    "input",
+    "locals",
+    "open",
+    "os",
+    "pathlib",
+    "requests",
+    "shutil",
+    "socket",
+    "subprocess",
+    "sys",
+    "vars",
+}
+
+BLOCKED_TOKENS = ("__", "import ", "open(", "exec(", "eval(", "subprocess", "socket", "requests", "http")
+
+
 class DataframeQueryService:
     @staticmethod
-    def answer_question(payload: DataframeQueryRequest, current_user: User) -> DataframeQueryResponse:
+    async def answer_question(payload: DataframeQueryRequest, current_user: User) -> DataframeQueryResponse:
         dataframe, source_type, source_name = DataframeQueryService._load_dataframe(payload, current_user)
-        agent = DataframeQueryService._build_agent(dataframe)
-        prompt = DataframeQueryService._build_prompt(payload.question, dataframe)
+        generated_code, explanation = await DataframeQueryService._plan_query(payload.question, dataframe, current_user.email)
+        result = await asyncio.to_thread(DataframeQueryService._evaluate_expression, generated_code, dataframe)
+        result_preview = DataframeQueryService._format_result_preview(result)
+        answer = await DataframeQueryService._synthesize_answer(
+            question=payload.question,
+            dataframe=dataframe,
+            result_preview=result_preview,
+            explanation=explanation,
+            user_email=current_user.email,
+        )
 
-        try:
-            result = agent.invoke(
-                {"input": prompt},
-                config={"metadata": {"user_email": current_user.email}},
-            )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail={"error": "dataframe_query_failed", "message": str(exc)},
-            ) from exc
-
-        answer = str(result.get("output", "")).strip()
         if not answer:
             raise HTTPException(
                 status_code=502,
                 detail={"error": "dataframe_query_failed", "message": "Empty dataframe agent response"},
             )
 
-        steps, generated_code = DataframeQueryService._extract_intermediate_steps(result.get("intermediate_steps"))
+        steps = [
+            f"planned_expression: {generated_code}",
+            f"planner_explanation: {explanation}",
+            f"result_preview: {result_preview}",
+        ]
         return DataframeQueryResponse(
             answer=answer,
             source_type=source_type,
@@ -56,44 +99,151 @@ class DataframeQueryService:
         )
 
     @staticmethod
-    def _build_prompt(question: str, dataframe: pd.DataFrame) -> str:
+    def _build_planning_prompt(question: str, dataframe: pd.DataFrame) -> str:
         preview_rows = min(5, len(dataframe.index))
-        column_list = ", ".join(str(column) for column in list(dataframe.columns)) or "No columns"
+        preview_text = dataframe.head(preview_rows).to_csv(index=False) if preview_rows > 0 else "<empty dataframe>"
+        dtypes_text = ", ".join(f"{column}: {dtype}" for column, dtype in dataframe.dtypes.items()) or "No columns"
         return (
-            "You are answering questions about a tabular dataset loaded into a pandas DataFrame named df. "
-            "Use only the dataframe content to answer the question. "
-            f"The dataframe has {len(dataframe.index)} rows and {len(dataframe.columns)} columns. "
-            f"Columns: {column_list}. "
-            f"Reference up to the first {preview_rows} rows when helpful. "
-            f"Question: {question}"
+            f"{DATAFRAME_AGENT_PROMPT}\n\n"
+            f"Dataframe shape: rows={len(dataframe.index)}, columns={len(dataframe.columns)}\n"
+            f"Columns and dtypes: {dtypes_text}\n"
+            f"Preview rows (CSV):\n{preview_text}\n"
+            f"Question: {question}\n"
         )
 
     @staticmethod
-    def _build_agent(dataframe: pd.DataFrame) -> Any:
+    async def _plan_query(question: str, dataframe: pd.DataFrame, user_email: str) -> tuple[str, str]:
         if llm is None:
             raise HTTPException(
                 status_code=503,
                 detail={"error": "llm_unavailable", "message": "LLM client is not configured"},
             )
 
-        errors: list[str] = []
-        for agent_type in ("tool-calling", "openai-tools"):
-            try:
-                return create_pandas_dataframe_agent(
-                    llm=llm,
-                    df=dataframe,
-                    agent_type=agent_type,
-                    verbose=False,
-                    allow_dangerous_code=True,
-                    return_intermediate_steps=True,
-                )
-            except Exception as exc:
-                errors.append(f"{agent_type}: {exc}")
+        prompt = DataframeQueryService._build_planning_prompt(question, dataframe)
+        response = await llm.ainvoke(prompt, config={"metadata": {"user_email": user_email}})
+        content = response.content if hasattr(response, "content") else str(response)
+        plan = DataframeQueryService._parse_json_payload(str(content))
 
-        raise HTTPException(
-            status_code=502,
-            detail={"error": "agent_initialization_failed", "message": " | ".join(errors)},
+        expression = str(plan.get("pandas_expression", "")).strip()
+        explanation = str(plan.get("explanation", "")).strip() or "No explanation provided"
+        DataframeQueryService._validate_expression(expression)
+        return expression, explanation
+
+    @staticmethod
+    def _parse_json_payload(content: str) -> dict[str, Any]:
+        candidate = content.strip()
+        candidate = re.sub(r"^```(?:json)?", "", candidate, flags=re.IGNORECASE).strip()
+        candidate = re.sub(r"```$", "", candidate).strip()
+
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", candidate, flags=re.DOTALL)
+            if not match:
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error": "dataframe_query_failed", "message": "Planner did not return valid JSON"},
+                )
+            try:
+                parsed = json.loads(match.group(0))
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error": "dataframe_query_failed", "message": "Planner returned malformed JSON"},
+                ) from exc
+
+        if not isinstance(parsed, dict):
+            raise HTTPException(
+                status_code=502,
+                detail={"error": "dataframe_query_failed", "message": "Planner JSON must be an object"},
+            )
+        return parsed
+
+    @staticmethod
+    def _validate_expression(expression: str) -> None:
+        cleaned = expression.strip()
+        if not cleaned:
+            raise HTTPException(
+                status_code=502,
+                detail={"error": "dataframe_query_failed", "message": "Planner returned an empty expression"},
+            )
+
+        lowered = cleaned.lower()
+        for token in BLOCKED_TOKENS:
+            if token in lowered:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": "unsafe_expression", "message": f"Blocked unsafe token in expression: {token}"},
+                )
+
+        try:
+            tree = ast.parse(cleaned, mode="eval")
+        except SyntaxError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "invalid_expression", "message": str(exc)},
+            ) from exc
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in BLOCKED_NAMES:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": "unsafe_expression", "message": f"Blocked unsafe name in expression: {node.id}"},
+                )
+            if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": "unsafe_expression", "message": "Dunder attributes are not allowed"},
+                )
+
+    @staticmethod
+    def _evaluate_expression(expression: str, dataframe: pd.DataFrame) -> Any:
+        try:
+            return eval(expression, {"__builtins__": {}}, {"df": dataframe, "pd": pd})
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "expression_execution_failed", "message": str(exc)},
+            ) from exc
+
+    @staticmethod
+    def _format_result_preview(result: Any) -> str:
+        if isinstance(result, pd.DataFrame):
+            if result.empty:
+                return "Empty DataFrame"
+            return result.head(20).to_csv(index=False).strip()
+        if isinstance(result, pd.Series):
+            if result.empty:
+                return "Empty Series"
+            return result.head(20).to_string()
+        if isinstance(result, (list, tuple, dict)):
+            return json.dumps(result, default=str, ensure_ascii=True)[:4000]
+        return str(result)
+
+    @staticmethod
+    async def _synthesize_answer(
+        question: str,
+        dataframe: pd.DataFrame,
+        result_preview: str,
+        explanation: str,
+        user_email: str,
+    ) -> str:
+        if llm is None:
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "llm_unavailable", "message": "LLM client is not configured"},
+            )
+
+        prompt = (
+            f"{ANSWER_SYNTHESIS_PROMPT}\n\n"
+            f"Question: {question}\n"
+            f"Dataframe shape: rows={len(dataframe.index)}, columns={len(dataframe.columns)}\n"
+            f"Planner explanation: {explanation}\n"
+            f"Executed result:\n{result_preview}\n"
         )
+        response = await llm.ainvoke(prompt, config={"metadata": {"user_email": user_email}})
+        content = response.content if hasattr(response, "content") else str(response)
+        return str(content).strip()
 
     @staticmethod
     def _load_dataframe(payload: DataframeQueryRequest, current_user: User) -> tuple[pd.DataFrame, str, str]:
@@ -183,35 +333,3 @@ class DataframeQueryService:
         trimmed = value.strip()
         match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", trimmed)
         return match.group(1) if match else trimmed
-
-    @staticmethod
-    def _extract_intermediate_steps(raw_steps: Any) -> tuple[list[str], str | None]:
-        if not isinstance(raw_steps, list):
-            return [], None
-
-        rendered_steps: list[str] = []
-        generated_code: str | None = None
-
-        for item in raw_steps:
-            if isinstance(item, tuple) and len(item) >= 2:
-                action, observation = item[0], item[1]
-                tool_name = str(getattr(action, "tool", "agent_step"))
-                tool_input = getattr(action, "tool_input", None)
-
-                if isinstance(tool_input, dict):
-                    tool_input_text = json.dumps(tool_input, ensure_ascii=True)
-                elif tool_input is None:
-                    tool_input_text = ""
-                else:
-                    tool_input_text = str(tool_input)
-
-                observation_text = str(observation)
-                rendered_steps.append(f"{tool_name}: {tool_input_text} => {observation_text}".strip())
-
-                if generated_code is None and tool_input_text:
-                    generated_code = tool_input_text
-                continue
-
-            rendered_steps.append(str(item))
-
-        return rendered_steps, generated_code

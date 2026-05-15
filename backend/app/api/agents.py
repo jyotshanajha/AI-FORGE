@@ -12,7 +12,6 @@ from app.schemas.agents import (
     TicTacToeMoveRequest,
     TicTacToeMoveResponse,
 )
-from app.services.dataframe_query_service import DataframeQueryService
 from app.services.research_digest_service import ResearchDigestService
 from app.services.tic_tac_toe_service import TicTacToeService
 
@@ -25,7 +24,9 @@ async def dataframe_query(
     payload: DataframeQueryRequest,
     current_user: User = Depends(get_current_user),
 ) -> DataframeQueryResponse:
-    return DataframeQueryService.answer_question(payload, current_user)
+    from app.services.dataframe_query_service import DataframeQueryService
+
+    return await DataframeQueryService.answer_question(payload, current_user)
 
 
 @router.post("/research-digest/stream")

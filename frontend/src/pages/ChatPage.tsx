@@ -7,12 +7,14 @@ import ChatIcon from '@mui/icons-material/Chat'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import ScienceIcon from '@mui/icons-material/Science'
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports'
+import TableChartIcon from '@mui/icons-material/TableChart'
 
 import { InputBar } from '../components/chat/InputBar'
 import { MessageList } from '../components/chat/MessageList'
 import { ThreadSidebar } from '../components/chat/ThreadSidebar'
 import { CosmicBackdrop } from '../components/chat/CosmicBackdrop'
 import { ImageGenPanel } from '../components/chat/ImageGenPanel'
+import { DataframeQueryPanel } from '../components/agents/DataframeQueryPanel'
 import { ResearchDigestPanel } from '../components/agents/ResearchDigestPanel'
 import { TicTacToePanel } from '../components/agents/TicTacToePanel'
 import { useAuth } from '../hooks/useAuth'
@@ -26,7 +28,7 @@ export default function ChatPage() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile)
   const [error, setError] = useState<string | null>(null)
-  const [mode, setMode] = useState<'chat' | 'image' | 'research' | 'tictactoe'>('chat')
+  const [mode, setMode] = useState<'chat' | 'image' | 'dataframe' | 'research' | 'tictactoe'>('chat')
   const [responseMode, setResponseMode] = useState<ChatResponseMode>('rag')
   const {
     threads,
@@ -233,7 +235,7 @@ export default function ChatPage() {
               borderTop: '1px solid rgba(160, 200, 255, 0.14)',
             }}
           >
-            {(['chat', 'image', 'research', 'tictactoe'] as const).map((m) => (
+            {(['chat', 'image', 'dataframe', 'research', 'tictactoe'] as const).map((m) => (
               <Button
                 key={m}
                 size="small"
@@ -244,9 +246,11 @@ export default function ChatPage() {
                     ? <ChatIcon fontSize="small" />
                     : m === 'image'
                       ? <AutoFixHighIcon fontSize="small" />
-                      : m === 'research'
-                        ? <ScienceIcon fontSize="small" />
-                        : <SportsEsportsIcon fontSize="small" />
+                      : m === 'dataframe'
+                        ? <TableChartIcon fontSize="small" />
+                        : m === 'research'
+                          ? <ScienceIcon fontSize="small" />
+                          : <SportsEsportsIcon fontSize="small" />
                 }
                 sx={{
                   borderRadius: 999,
@@ -263,7 +267,7 @@ export default function ChatPage() {
                     : { color: 'text.secondary' }),
                 }}
               >
-                {m === 'chat' ? 'Chat' : m === 'image' ? 'Generate Image' : m === 'research' ? 'Research Digest' : 'Tic Tac Toe'}
+                {m === 'chat' ? 'Chat' : m === 'image' ? 'Generate Image' : m === 'dataframe' ? 'Sheets & CSV' : m === 'research' ? 'Research Digest' : 'Tic Tac Toe'}
               </Button>
             ))}
           </Box>
@@ -293,6 +297,8 @@ export default function ChatPage() {
               threadId={resolvedActiveThreadId ?? undefined}
               onGenerated={() => setMode('chat')}
             />
+          ) : mode === 'dataframe' ? (
+            <DataframeQueryPanel />
           ) : mode === 'research' ? (
             <ResearchDigestPanel />
           ) : (

@@ -51,6 +51,17 @@ export interface ResearchDigestTokenEvent {
   token: string
 }
 
+export interface DataframeQueryResponse {
+  answer: string
+  source_type: string
+  source_name: string
+  row_count: number
+  column_count: number
+  columns: string[]
+  generated_code?: string | null
+  intermediate_steps: string[]
+}
+
 export interface TicTacToeMoveResponse {
   board: string[]
   ai_move?: number
