@@ -1,6 +1,15 @@
 import { z } from 'zod'
 
-import type { AuthResponse, ChatAttachment, ChatTokenEvent, Message, Thread } from '../types/api'
+import type {
+  AuthResponse,
+  ChatAttachment,
+  ChatResponseMode,
+  ChatTokenEvent,
+  Message,
+  ResearchDigestTokenEvent,
+  Thread,
+  TicTacToeMoveResponse,
+} from '../types/api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
 
@@ -19,6 +28,17 @@ const threadSchema = z.object({
   updated_at: z.string(),
 })
 
+const ragInfoSchema = z.object({
+  chunks_count: z.number(),
+  page_count: z.number(),
+  characters_processed: z.number(),
+})
+
+const ragInfoOptionalSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  ragInfoSchema.optional(),
+)
+
 const attachmentSchema = z.object({
   id: z.string(),
   filename: z.string(),
@@ -26,6 +46,7 @@ const attachmentSchema = z.object({
   size_bytes: z.number(),
   attachment_type: z.string(),
   download_url: z.string(),
+  rag_info: ragInfoOptionalSchema,
 })
 
 const messageSchema = z.object({
@@ -38,48 +59,59 @@ const messageSchema = z.object({
 })
 
 const imageGenerationResponseSchema = z.object({
-  url: z.string(),
-  filename: z.string(),
-  mime_type: z.string(),
+  attachment: attachmentSchema,
   original_prompt: z.string(),
-  size_bytes: z.number(),
+  message_id: z.string().optional().nullable(),
 })
 
+export interface GeneratedImageResult {
+  attachment: ChatAttachment
+  messageId?: string
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers ?? {}),
-    },
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10000) // 10 second timeout
 
-  if (!response.ok) {
-    let errorMessage = `Request failed (${response.status})`
-    try {
-      const data = await response.json()
-      if (data.detail) {
-        if (typeof data.detail === 'string') {
-          errorMessage = data.detail
-        } else if (data.detail.message) {
-          errorMessage = data.detail.message
-        } else if (data.detail.error) {
-          errorMessage = data.detail.error
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers ?? {}),
+      },
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      let errorMessage = `Request failed (${response.status})`
+      try {
+        const data = await response.json()
+        if (data.detail) {
+          if (typeof data.detail === 'string') {
+            errorMessage = data.detail
+          } else if (data.detail.message) {
+            errorMessage = data.detail.message
+          } else if (data.detail.error) {
+            errorMessage = data.detail.error
+          }
         }
+      } catch {
+        // If response is not JSON, use the status text
+        errorMessage = response.statusText || errorMessage
       }
-    } catch {
-      // If response is not JSON, use the status text
-      errorMessage = response.statusText || errorMessage
+      throw new Error(errorMessage)
     }
-    throw new Error(errorMessage)
-  }
 
-  if (response.status === 204) {
-    return undefined as T
-  }
+    if (response.status === 204) {
+      return undefined as T
+    }
 
-  return (await response.json()) as T
+    return (await response.json()) as T
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 export async function register(email: string, password: string): Promise<AuthResponse> {
@@ -145,6 +177,7 @@ function normalizeAttachment(attachment: ChatAttachment): ChatAttachment {
   return {
     ...attachment,
     download_url: toAbsoluteDownloadUrl(attachment.download_url),
+    rag_info: attachment.rag_info ?? undefined,
   }
 }
 
@@ -188,12 +221,18 @@ export async function streamChat(
   message: string,
   onToken: (event: ChatTokenEvent) => void,
   attachmentIds: string[] = [],
+  responseMode: ChatResponseMode = 'rag',
 ): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/chat/stream`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ thread_id: threadId, message, attachment_ids: attachmentIds }),
+    body: JSON.stringify({
+      thread_id: threadId,
+      message,
+      attachment_ids: attachmentIds,
+      response_mode: responseMode,
+    }),
   })
 
   if (!response.ok || !response.body) {
@@ -228,20 +267,66 @@ export async function streamChat(
   }
 }
 
-export async function generateImage(prompt: string, threadId?: string): Promise<ChatAttachment> {
+export async function generateImage(prompt: string, threadId?: string): Promise<GeneratedImageResult> {
   const payload = await request<any>('/chat/generate-image', {
     method: 'POST',
     body: JSON.stringify({ prompt, thread_id: threadId }),
   })
 
-  // Convert image response to attachment format
   const response = imageGenerationResponseSchema.parse(payload)
   return {
-    id: crypto.randomUUID(),
-    filename: response.filename,
-    mime_type: response.mime_type,
-    size_bytes: response.size_bytes,
-    attachment_type: 'image',
-    download_url: response.url,
+    attachment: normalizeAttachment(response.attachment),
+    messageId: response.message_id ?? undefined,
   }
+}
+
+export async function streamResearchDigest(
+  query: string,
+  onToken: (event: ResearchDigestTokenEvent) => void,
+  maxPapers: number = 8,
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/agents/research-digest/stream`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, max_papers: maxPapers }),
+  })
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Research stream failed (${response.status})`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+    const events = buffer.split('\n\n')
+    buffer = events.pop() ?? ''
+
+    for (const rawEvent of events) {
+      if (!rawEvent.startsWith('data: ')) {
+        continue
+      }
+      const data = rawEvent.slice('data: '.length)
+      if (data === '[DONE]') {
+        return
+      }
+      const parsed = JSON.parse(data) as ResearchDigestTokenEvent
+      onToken(parsed)
+    }
+  }
+}
+
+export async function ticTacToeMove(board: string[], playerMove: number): Promise<TicTacToeMoveResponse> {
+  return request<TicTacToeMoveResponse>('/agents/tic-tac-toe/move', {
+    method: 'POST',
+    body: JSON.stringify({ board, player_move: playerMove }),
+  })
 }

@@ -8,7 +8,17 @@ export function useAuth() {
 
   const meQuery = useQuery({
     queryKey: ['me'],
-    queryFn: me,
+    queryFn: async () => {
+      try {
+        return await me()
+      } catch (error) {
+        // 401 Unauthorized is expected when not logged in - treat as success with no user
+        if (error instanceof Error && error.message.includes('401')) {
+          return undefined
+        }
+        throw error
+      }
+    },
     retry: false,
   })
 
@@ -18,11 +28,11 @@ export function useAuth() {
     const error = params.get('error')
     if (error) {
       console.error('OAuth error:', error, params.get('message'))
-    } else {
-      // Refetch in case we just came back from OAuth
-      meQuery.refetch()
+    } else if (params.has('code') || params.has('state')) {
+      // Only refetch if we detect OAuth params
+      void meQuery.refetch()
     }
-  }, [])
+  }, []) // Empty dependency array - only run on mount
 
   const loginMutation = useMutation({
     mutationFn: (values: { email: string; password: string }) => login(values.email, values.password),

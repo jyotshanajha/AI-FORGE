@@ -9,7 +9,7 @@ import {
   renameThread,
   streamChat,
 } from '../lib/api'
-import type { ChatAttachment, Message } from '../types/api'
+import type { ChatAttachment, ChatResponseMode, Message } from '../types/api'
 
 export function useChat(activeThreadId: string | null) {
   const queryClient = useQueryClient()
@@ -52,6 +52,7 @@ export function useChat(activeThreadId: string | null) {
     threadId: string,
     message: string,
     attachments: ChatAttachment[] = [],
+    responseMode: ChatResponseMode = 'rag',
   ): Promise<void> => {
     if (!threadId || (!message.trim() && attachments.length === 0)) {
       return
@@ -96,6 +97,7 @@ export function useChat(activeThreadId: string | null) {
           })
         },
         attachments.map((attachment) => attachment.id),
+        responseMode,
       )
       await queryClient.invalidateQueries({ queryKey: ['messages', threadId] })
       await queryClient.invalidateQueries({ queryKey: ['threads'] })

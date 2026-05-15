@@ -113,6 +113,7 @@ class ImageService:
                 "mime_type": "image/png",
                 "original_prompt": prompt,
                 "size_bytes": len(image_bytes),
+                "stored_path": str(filepath),
             }
 
             print(f"[SUCCESS] Image generated successfully!")

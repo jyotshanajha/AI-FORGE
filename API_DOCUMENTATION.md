@@ -1,52 +1,296 @@
-# Amzur AI Chat - API Documentation
+# API Documentation — Amzur AI Chat
 
-## Base URL
-- **Development**: `http://localhost:8000/api`
-- **Headers**: `Content-Type: application/json`
-- **Cookies**: All requests automatically include `access_token` httpOnly cookie
+**Base URL**: `http://localhost:8000/api`  
+**Format**: JSON  
+**Auth**: JWT in httpOnly cookies + `user_email` metadata on AI calls  
+**Rate Limits**: Per-user quota enforced via LiteLLM
 
 ---
 
-## Authentication Endpoints
+## 🔐 Authentication
 
-### 1. Register New User
-**POST** `/auth/register`
+### Register
+```
+POST /auth/register
+Content-Type: application/json
 
-**Request Body**
-```json
 {
   "email": "user@example.com",
-  "password": "securePassword123"
+  "password": "SecurePass123!"
 }
-```
 
-**Response** (201)
-```json
+Response 200:
 {
   "user": {
     "id": "550e8400-e29b-41d4-a716-446655440000",
-    "email": "user@example.com",
-    "created_at": "2026-05-09T10:30:00+00:00"
+    "email": "user@example.com"
   }
 }
 ```
 
-**Errors**
-- `400`: Email already exists
-- `400`: Password too short
-- `500`: Server error
+### Login
+```
+POST /auth/login
+
+{
+  "email": "user@example.com",
+  "password": "SecurePass123!"
+}
+
+Response 200:
+{
+  "user": {"id": "...", "email": "..."}
+}  
+Set-Cookie: access_token=jwt_token; HttpOnly; Secure; SameSite=Lax
+```
+
+### Get Current User
+```
+GET /auth/me
+Cookie: access_token=...
+
+Response 200:
+{
+  "user": {"id": "...", "email": "user@example.com"}
+}
+```
+
+### Logout
+```
+POST /auth/logout
+Cookie: access_token=...
+
+Response 200
+Set-Cookie: access_token=; Max-Age=0; HttpOnly
+```
+
+### Google OAuth
+```
+GET /auth/google/login
+→ Redirects to Google consent screen
+
+GET /auth/google/callback?code=...
+→ Exchanges code, creates/links user, redirects to frontend
+→ Sets access_token cookie
+```
 
 ---
 
-### 2. Login with Email/Password
-**POST** `/auth/login`
+## 💬 Chat & Streaming
 
-**Request Body**
-```json
+### Send Message (Stream)
+```
+POST /chat/stream
+Cookie: access_token=...
+
 {
-  "email": "user@example.com",
-  "password": "securePassword123"
+  "thread_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "What are neural networks?",
+  "attachment_ids": [],
+  "response_mode": "llm"
 }
+
+Response 200 (text/event-stream):
+data: {"token": "Neural"}
+data: {"token": " networks"}
+data: {"token": " are..."}
+...
+data: [DONE]
+```
+
+### Generate Image
+```
+POST /chat/generate-image
+Cookie: access_token=...
+
+{
+  "thread_id": "...",
+  "prompt": "A serene mountain landscape at sunset"
+}
+
+Response 200:
+{
+  "image_url": "http://localhost:8000/uploads/d289411a.../image.jpg"
+}
+```
+
+### Get Messages
+```
+GET /chat/{thread_id}/messages
+Cookie: access_token=...
+
+Response 200:
+{
+  "messages": [
+    {
+      "id": "...",
+      "thread_id": "...",
+      "content": "Hello",
+      "role": "user",
+      "created_at": "2026-05-15T10:30:00+00:00"
+    },
+    ...
+  ]
+}
+```
+
+### Upload File
+```
+POST /chat/upload
+Cookie: access_token=...
+Content-Type: multipart/form-data
+
+file: <binary file data>
+
+Response 200:
+{
+  "attachment_id": "550e8400-e29b-41d4-a716-446655440000",
+  "filename": "README.md",
+  "mimetype": "text/markdown",
+  "size": 1024
+}
+```
+
+---
+
+## 🧵 Threads
+
+### Create Thread
+```
+POST /threads/create
+Cookie: access_token=...
+
+Response 201:
+{
+  "thread_id": "550e8400-e29b-41d4-a716-446655440000",
+  "title": "Untitled",
+  "created_at": "2026-05-15T10:30:00+00:00"
+}
+```
+
+### List Threads
+```
+GET /threads
+Cookie: access_token=...
+
+Response 200:
+{
+  "threads": [
+    {
+      "id": "...",
+      "title": "Project Discussion",
+      "created_at": "...",
+      "updated_at": "..."
+    }
+  ]
+}
+```
+
+### Rename Thread
+```
+PUT /threads/{thread_id}/rename
+Cookie: access_token=...
+
+{
+  "new_title": "ML Research"
+}
+
+Response 200:
+{
+  "thread_id": "...",
+  "title": "ML Research"
+}
+```
+
+### Delete Thread
+```
+DELETE /threads/{thread_id}
+Cookie: access_token=...
+
+Response 204 (No Content)
+```
+
+---
+
+## 🤖 Agents
+
+### Research Digest (Stream)
+```
+POST /agents/research-digest/stream
+Cookie: access_token=...
+
+{
+  "query": "machine learning interpretability",
+  "max_papers": 5
+}
+
+Response 200 (text/event-stream):
+data: {"token": "## Research"}
+data: {"token": " Digest:"}
+...
+data: [DONE]
+```
+
+### Tic Tac Toe Move
+```
+POST /agents/tic-tac-toe/move
+Cookie: access_token=...
+
+{
+  "board": [0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "player_move": 4
+}
+
+Response 200:
+{
+  "board": [0, 0, 0, 0, 1, 0, 0, 0, 0],
+  "ai_move": 0,
+  "winner": null,
+  "status": "in_progress",
+  "next_turn": "player"
+}
+```
+
+---
+
+## 📊 SQL Queries (Natural Language)
+
+### Chat with SQL Mode
+```
+POST /chat/stream
+Cookie: access_token=...
+
+{
+  "thread_id": "...",
+  "message": "How many active users do we have?",
+  "response_mode": "sql"
+}
+
+Response 200 (text/event-stream):
+data: {"token": "| user_id"}
+data: {"token": " | count"}
+...
+data: [DONE]
+```
+
+**Safety Features:**
+- Case-insensitive keyword block: INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER
+- Read-only execution only
+- Schema introspection via `information_schema`
+- User-scoped query results
+
+---
+
+## ✅ Health Check
+
+```
+GET /health
+
+Response 200:
+{
+  "status": "ok"
+}
+```
 ```
 
 **Response** (200)

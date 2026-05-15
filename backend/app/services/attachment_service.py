@@ -99,6 +99,38 @@ class AttachmentService:
         return AttachmentService._to_response(metadata)
 
     @staticmethod
+    def register_generated_attachment(
+        user_id: uuid.UUID,
+        filename: str,
+        mime_type: str,
+        size_bytes: int,
+        stored_path: str,
+    ) -> dict[str, object]:
+        attachment_id = uuid.uuid4()
+        metadata = {
+            "id": str(attachment_id),
+            "user_id": str(user_id),
+            "message_id": None,
+            "filename": filename,
+            "mime_type": mime_type,
+            "size_bytes": size_bytes,
+            "attachment_type": AttachmentService._classify_attachment(mime_type, filename),
+            "stored_path": stored_path,
+            "created_at": AttachmentService._now_utc().isoformat(),
+        }
+
+        def _mutator(store: dict) -> None:
+            pending_by_user = store.setdefault("pending_attachments_by_user_id", {})
+            pending = pending_by_user.setdefault(str(user_id), {})
+            pending[str(attachment_id)] = metadata
+
+            by_id = store.setdefault("attachments_by_id", {})
+            by_id[str(attachment_id)] = metadata
+
+        update_store(_mutator)
+        return AttachmentService._to_response(metadata)
+
+    @staticmethod
     def bind_attachments_to_message(
         user_id: uuid.UUID,
         attachment_ids: list[uuid.UUID],
@@ -180,14 +212,17 @@ class AttachmentService:
 
     @staticmethod
     def _to_response(metadata: dict[str, object]) -> dict[str, object]:
-        return {
+        result: dict[str, object] = {
             "id": uuid.UUID(str(metadata["id"])),
             "filename": str(metadata["filename"]),
             "mime_type": str(metadata["mime_type"]),
-            "size_bytes": int(metadata["size_bytes"]),
+            "size_bytes": int(metadata["size_bytes"]),  # type: ignore[arg-type]
             "attachment_type": str(metadata["attachment_type"]),
             "download_url": f"/chat/attachments/{metadata['id']}/download",
         }
+        if metadata.get("rag_info"):
+            result["rag_info"] = metadata["rag_info"]
+        return result
 
     @staticmethod
     async def ingest_pdf_if_needed(
@@ -197,23 +232,37 @@ class AttachmentService:
         mime_type: str,
         filename: str,
         stored_path: str,
-    ) -> None:
+    ) -> dict | None:
         """
         Ingest PDF into ChromaDB if it's a PDF attachment.
-        This runs asynchronously to not block attachment upload.
+        Returns a dict with chunk metadata on success, or None.
         """
         if mime_type.lower() not in {"application/pdf", "application/x-pdf"}:
-            return
+            return None
 
         try:
             from app.services.rag_service import get_rag_service
             rag = get_rag_service()
-            await rag.ingest_pdf(
+            result = await rag.ingest_pdf(
                 pdf_path=stored_path,
                 user_id=str(user_id),
                 user_email=user_email,
                 filename=filename,
             )
+            rag_info_data = {
+                "chunks_count": result.get("chunks_count", 0),
+                "page_count": result.get("page_count", 0),
+                "characters_processed": result.get("characters_processed", 0),
+            }
+            # Persist rag_info into the attachment metadata so future responses include it
+            def _rag_mutator(store: dict) -> None:
+                by_id = store.get("attachments_by_id", {})
+                entry = by_id.get(str(attachment_id))
+                if isinstance(entry, dict):
+                    entry["rag_info"] = rag_info_data
+
+            update_store(_rag_mutator)
+            return rag_info_data
         except Exception as e:
-            # Log but don't fail attachment upload if RAG ingestion fails
             print(f"Warning: PDF ingestion failed for {filename}: {str(e)}")
+            return None

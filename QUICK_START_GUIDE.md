@@ -1,52 +1,144 @@
-# Amzur AI Chat - Quick Start & Testing Guide
+# Quick Start Guide — Amzur AI Chat
 
-## 🚀 Current Status
+## 🚀 Installation
 
-✅ **Backend**: Running on http://127.0.0.1:8000
-✅ **Frontend**: Running on http://localhost:5173
-✅ **Google OAuth**: Configured and working
-✅ **Login**: Successfully tested
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+.venv/Scripts/activate  # Windows; on macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Configure `.env`** (copy from `.env.example`):
+```bash
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/aiforge
+LITELLM_PROXY_URL=https://litellm.amzur.com
+LITELLM_API_KEY=sk-...
+SECRET_KEY=your_32_char_secret_key
+```
+
+**Start server**:
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+Backend running at: **http://localhost:8000**  
+API docs at: **http://localhost:8000/docs**
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend running at: **http://localhost:5173**
 
 ---
 
-## 📱 How to Use the Application
+## 📱 Using the App
 
-### 1. **Access the App**
-Open your browser and go to: **http://localhost:5173**
+### Authentication
 
-### 2. **Authentication Options**
+**Option 1: Email/Password**
+1. Go to http://localhost:5173
+2. Click "Sign up"
+3. Enter email and password
+4. Create account
+5. Log in with same credentials
 
-#### Option A: Sign in with Google
-1. Click the **"Sign in with Google"** button
-2. You'll be redirected to Google login
-3. Complete Google authentication
-4. You'll be redirected back to the app - automatically logged in ✅
+**Option 2: Google OAuth**
+1. Click "Sign in with Google"
+2. Complete Google authentication
+3. Auto-redirected to app (account linked)
 
-#### Option B: Email/Password (Manual)
-1. Click **"Sign up"** tab
-2. Enter an email and password
-3. Click **Sign up** to create account
-4. Then login with the same credentials
+### Chat Interface
 
-### 3. **Using the Chat**
-Once logged in, you'll see:
-- **Left Sidebar**: List of your chat threads
-- **Main Area**: Current chat messages
-- **Input Box**: Type your message
+**Left Sidebar**
+- Your conversation threads
+- Click to open
+- Edit icon to rename
+- Delete icon to remove
+- "New Chat" button for fresh thread
 
-#### Create a New Chat
-Click **"New Chat"** button in the top-left sidebar
+**Main Chat Area**
+- Message history with streaming responses
+- Token-by-token rendering
+- Markdown, code blocks, LaTeX support
 
-#### Send a Message
-1. Type in the message input field
-2. Click **Send** or press Ctrl+Enter
-3. Message streams back token-by-token
+**Input Bar with Mode Selector**
+- **LLM**: Standard chat (gpt-4o, Gemini)
+- **SQL**: Natural language queries → SQL execution
+- **Image**: Generate images from text
+- **Research**: arXiv digest + synthesis
+- **Game**: Tic Tac Toe with AI opponent
 
-#### Manage Threads
-- **Click thread name** to view that conversation
-- **Edit icon** to rename a thread
-- **Delete icon** to delete a thread
-- **New Chat** to start a fresh conversation
+### Advanced Features
+
+**Upload Attachments**
+- Click paperclip in input bar
+- Select file (JPG, PNG, PDF, CSV, Excel, code)
+- Attached files sent with message
+- PDFs auto-indexed in RAG
+
+**Generate Images**
+1. Switch to "Image" mode
+2. Type description: "A serene mountain landscape at sunset"
+3. Click Send
+4. Image generated and displayed
+
+**Query Database (SQL Mode)**
+1. Switch to "SQL" mode
+2. Ask: "How many users registered last week?"
+3. Backend generates safe SQL → executes → returns results
+
+**Research Digest**
+1. Switch to "Research" mode
+2. Enter topic: "machine learning interpretability"
+3. Agent searches arXiv, collects papers, synthesizes digest
+4. Real-time streaming structured output
+
+---
+
+## 🧪 Testing
+
+### Run Sanity Checks
+
+```bash
+cd backend
+python -c "import json, uuid, urllib.request, http.cookiejar
+# See backend/test_both.py for full suite
+python test_both.py
+```
+
+### Expected Results
+- ✅ Auth register/login/me/logout: 200
+- ✅ Thread CRUD: 200/204
+- ✅ Chat stream LLM: 200 + `[DONE]` token
+- ✅ Chat stream SQL: 200 + `[DONE]` token
+- ✅ Research digest: 200 + `[DONE]` token
+- ✅ Tic Tac Toe: 200 + valid board state
+- ✅ Upload attachment: 200 + file id
+
+### Common Issues
+
+**`No module named 'app'`**  
+→ Run `uvicorn` from `backend/` directory
+
+**`psycopg2 not found`**  
+→ `pip install psycopg2-binary`
+
+**Connection to `litellm.amzur.com` failed**  
+→ Ensure VPN is connected (internal endpoint)
+
+**Port 8000 already in use**  
+→ `uvicorn app.main:app --port 8001`
+
+**Frontend blank screen**  
+→ Check browser console for errors; ensure backend is running
 
 ### 4. **Logout**
 Click the **Logout** button in the top-right corner (in the header with your email)

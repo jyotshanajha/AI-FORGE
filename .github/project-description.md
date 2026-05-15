@@ -277,3 +277,10 @@ Acceptance criteria
 - Per-user document isolation prevents information leakage.
 - PDF ingestion completes without blocking chat functionality.
 - Vector storage persists across server restarts.
+
+
+For Project 5, 
+Whatever valid files the user uploads into the chat, the items should be stored locally in the codebase folder but in the supabase attachments data table, file_path or storage_path should populate the actual local file path thats in the code folder. Please do not store the uploaded files directly in the supabase db.
+
+
+Project 8: Connect to a Database and ask questions in natural language.  It could be any questions that typically asked as a SQL statement.

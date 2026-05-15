@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from app.models.thread import Thread
 from app.models.user import User
 from app.services.attachment_service import AttachmentService
 from app.services.fallback_store import get_store, update_store
+from app.services.sql_chat_service import SQLChatService
 from app.services.thread_service import ThreadService
 
 
@@ -105,6 +107,7 @@ class ChatService:
         thread_id: uuid.UUID,
         user_message: str,
         attachment_ids: list[uuid.UUID] | None = None,
+        response_mode: Literal["rag", "llm", "sql"] = "rag",
     ) -> AsyncGenerator[str, None]:
         thread = await ThreadService.get_thread_or_404(db, user, thread_id)
 
@@ -131,39 +134,83 @@ class ChatService:
             ChatService._persist_messages_to_store()
             history_records = thread_messages
 
-        bound_attachments = AttachmentService.bind_attachments_to_message(
-            user.id,
-            attachment_ids or [],
-            user_record.id,
-        )
+        bound_attachments = []
+        if response_mode == "rag":
+            bound_attachments = AttachmentService.bind_attachments_to_message(
+                user.id,
+                attachment_ids or [],
+                user_record.id,
+            )
+
+            # Enrich bound_attachments with stored_path from the fallback store so
+            # the multimodal builder can read the actual files from disk.
+            from app.services.fallback_store import get_store as _get_store
+            _store = _get_store()
+            _by_id = _store.get("attachments_by_id", {})
+            for att in bound_attachments:
+                att_id = str(att.get("id", ""))
+                if att_id in _by_id:
+                    att["stored_path"] = _by_id[att_id].get("stored_path")
 
         limited_history_records = ChatService._limit_history(history_records[:-1])
         history = [{"role": m.role, "content": m.content} for m in limited_history_records]
 
-        prompt_message = clean_message or "Please analyze the attached files and respond."
-        if bound_attachments:
+        use_rag_mode = response_mode == "rag"
+        use_sql_mode = response_mode == "sql"
+
+        prompt_message = clean_message or (
+            "Please answer this generally without using uploaded documents."
+            if not use_rag_mode
+            else "Please acknowledge the attached files."
+        )
+        if use_rag_mode and bound_attachments:
             lines = [
                 f"- {item['filename']} ({item['attachment_type']}, {item['mime_type']}, {item['size_bytes']} bytes)"
                 for item in bound_attachments
             ]
-            prompt_message = f"{prompt_message}\n\nAttached files:\n" + "\n".join(lines)
+            prompt_message = prompt_message + "\n\nAttached files:\n" + "\n".join(lines)
+
+        # Build multimodal content parts (images, video inline; Excel/CSV as text tables)
+        multimodal_parts: list[dict] = []
+        if use_rag_mode:
+            try:
+                from app.ai.multimodal import build_multimodal_parts
+                multimodal_parts = build_multimodal_parts(bound_attachments)
+            except Exception as exc:
+                import logging as _log
+                _log.getLogger(__name__).warning("Multimodal part build failed: %s", exc)
 
         # Retrieve RAG context from uploaded documents
-        try:
-            from app.services.rag_service import get_rag_service
-            rag = get_rag_service()
-            rag_context = await rag.retrieve_context(str(user.id), clean_message, top_k=5)
-            if rag_context:
-                context_text = "\n\n".join(rag_context)
-                prompt_message += f"\n\nContext from your documents:\n{context_text}"
-        except Exception:
-            # If RAG retrieval fails, continue without context
-            pass
+        if use_rag_mode:
+            try:
+                from app.services.rag_service import get_rag_service
+                rag = get_rag_service()
+                rag_context = await rag.retrieve_context(str(user.id), clean_message, top_k=5)
+                if rag_context:
+                    context_text = "\n\n".join(rag_context)
+                    prompt_message += f"\n\nContext from your documents:\n{context_text}"
+            except Exception:
+                # If RAG retrieval fails, continue without context
+                pass
+
+        # In LLM mode, avoid carrying forward document-focused turns from prior RAG exchanges.
+        model_history = history if use_rag_mode else []
 
         chunks: list[str] = []
-        async for chunk in stream_chat_response(prompt_message, history, user.email):
-            chunks.append(chunk)
-            yield chunk
+        if use_sql_mode:
+            async for chunk in SQLChatService.stream_sql_reply(clean_message, user.email):
+                chunks.append(chunk)
+                yield chunk
+        else:
+            async for chunk in stream_chat_response(
+                prompt_message,
+                model_history,
+                user.email,
+                multimodal_parts=multimodal_parts or None,
+                response_mode=response_mode,
+            ):
+                chunks.append(chunk)
+                yield chunk
 
         assistant_text = "".join(chunks).strip()
         if not assistant_text:

@@ -1,24 +1,35 @@
-# Amzur AI Chat
+# Amzur AI Chat — Full-Featured Conversational AI Platform
 
-Monorepo with:
-- `frontend/` React + TypeScript + Tailwind
-- `backend/` FastAPI + SQLAlchemy + LangChain (LiteLLM proxy)
+**Status**: ✅ All 11 projects complete • All features tested and verified
 
-## 1) Configure environment
+## Overview
 
-1. Copy `.env.example` to `.env` in repo root.
-2. Fill required values (database, LiteLLM, auth, Google OAuth).
-3. Optional frontend env: copy `frontend/.env.example` to `frontend/.env`.
+Amzur AI Chat is a production-ready, multi-user conversational AI platform with:
+- **React 18+ TypeScript** frontend (Vite, Tailwind CSS)
+- **FastAPI Python 3.11+** backend (SQLAlchemy, LangChain, LiteLLM)
+- **PostgreSQL** persistent storage with JWT authentication
+- **Advanced features**: RAG (ChromaDB), image generation, NL-to-SQL, agents (research digest, Tic Tac Toe)
 
-## 2) Run backend
+## Quick Start
+
+### Prerequisites
+- Python 3.11+ (backend)
+- Node.js 18+ (frontend)
+- PostgreSQL database (local or Supabase)
+- LiteLLM proxy API key (internal `litellm.amzur.com`)
+
+### Backend Setup
 
 ```bash
 cd backend
+python -m venv .venv
+.venv/Scripts/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env  # Update DATABASE_URL and LITELLM_API_KEY
 uvicorn app.main:app --reload --port 8000
 ```
 
-## 3) Run frontend
+### Frontend Setup
 
 ```bash
 cd frontend
@@ -26,30 +37,96 @@ npm install
 npm run dev
 ```
 
-Frontend default URL: `http://localhost:5173`  
-Backend default URL: `http://localhost:8000`
+Access at:
+- **Frontend**: http://localhost:5173
+- **Backend**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
 
-## 4) Features
+## Core Features
 
-### Core
-- **Streaming chat** with LLM responses (token-by-token)
-- **Multi-user support** with email/password and Google OAuth authentication
-- **Thread management** with auto-generated titles and renaming
-- **Conversation memory** - remembers last 5 exchanges per chat
+### 🔐 Authentication
+- **Email/password** with bcrypt hashing
+- **Google OAuth 2.0** account linking
+- **JWT in httpOnly cookies** (XSS-safe)
+- **Multi-user** isolated sessions
 
-### Advanced
-- **Multi-modal attachments** - upload images, videos, CSV/Excel, LaTeX, code
-- **Image generation** - generate images from text prompts (Gemini 2.0)
-- **RAG with PDFs** - upload and chat about PDF documents using ChromaDB + embeddings
-- **Persistent storage** - all data saved to PostgreSQL via Supabase
-- **Secure auth** - JWT in httpOnly cookies, bcrypt password hashing
+### 💬 Chat & Streaming
+- **Token-by-token streaming** responses via SSE
+- **Conversation memory** (persistent last 5 exchanges)
+- **Thread-based organization** with auto-titling
+- **LiteLLM proxy routing** (gpt-4o, Gemini 2.5 Flash)
 
-### Architecture
-- **LiteLLM proxy** - all AI calls routed through `litellm.amzur.com`
-- **LangChain LCEL** - language chains for flexible AI composition
-- **React Query** - efficient server state management
-- **Tailwind CSS** - responsive, dark-mode-ready UI
-- **ChromaDB** - vector store for document embeddings
+### 📎 Multi-Modal Support
+- **Image upload & storage** (JPG, PNG, WebP)
+- **PDF RAG** via ChromaDB embeddings
+- **CSV/Excel analysis** via NL queries
+- **Code & LaTeX rendering** in chat
+
+### 🎨 Advanced Agents
+- **Project 8**: NL-to-SQL chat (read-only, safe keyword blocks)
+- **Project 10**: Research Digest Agent (arXiv streaming + LLM synthesis)
+- **Project 11**: Tic Tac Toe with minimax AI
+
+### 🖼️ Image Generation
+- **Gemini image generation** on demand
+- **User-scoped storage** with unique file paths
+
+## Architecture
+
+### Backend Structure
+```
+backend/app/
+├── api/             # Route handlers (no business logic)
+├── services/        # Business logic (testable, framework-agnostic)
+├── models/          # SQLAlchemy ORM definitions
+├── schemas/         # Pydantic request/response models
+├── ai/              # LiteLLM client, chains, RAG, prompts
+├── core/            # Config, security, logging
+└── db/              # Session management, Alembic migrations
+```
+
+### Key Technologies
+| Layer | Technology | Purpose |
+|-------|-----------|----------|
+| Frontend | React 18, TypeScript, Vite, Tailwind | UI, streaming render, dark mode |
+| Backend | FastAPI, SQLAlchemy 2.0, Alembic | REST, ORM, migrations |
+| Auth | JWT, bcrypt, Google OAuth 2.0 | Secure session, account linking |
+| AI | LangChain LCEL, LiteLLM | Chain composition, LLM gateway |
+| Vector | ChromaDB | Per-user RAG collections |
+| Database | PostgreSQL + asyncpg | Production persistence |
+
+## Environment Variables
+
+Create `.env` in repo root:
+
+```bash
+# App
+SECRET_KEY=your_secret_key_min_32_chars
+JWT_EXPIRE_MINUTES=480
+APP_NAME=amzur-ai-chat
+ENVIRONMENT=development
+
+# Database
+DATABASE_URL=postgresql+asyncpg://user:password@host:5432/dbname
+
+# LiteLLM Proxy (internal — VPN required)
+LITELLM_PROXY_URL=https://litellm.amzur.com
+LITELLM_API_KEY=sk-...
+LLM_MODEL=gemini/gemini-2.5-flash
+LITELLM_EMBEDDING_MODEL=text-embedding-3-large
+IMAGE_GEN_MODEL=gemini/imagen-4.0-fast-generate-001
+
+# Google OAuth (optional for testing)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=http://localhost:8000/api/auth/google/callback
+
+# File & Vector Storage
+MAX_UPLOAD_MB=20
+UPLOAD_DIR=./uploads
+CHROMA_PERSIST_DIR=./chroma_db
+CHAT_MEMORY_CONVERSATION_LIMIT=5
+```
 
 ## 5) Environment variables
 

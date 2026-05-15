@@ -111,6 +111,7 @@ class RAGService:
                 "document_id": filename,
                 "chunks_count": len(chunks),
                 "characters_processed": len(text),
+                "page_count": len(pdf_reader.pages),
             }
 
         except Exception as e:

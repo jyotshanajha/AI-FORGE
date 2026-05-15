@@ -1,7 +1,14 @@
 import uuid
 from datetime import datetime
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
+
+
+class RagInfo(BaseModel):
+    chunks_count: int
+    page_count: int
+    characters_processed: int
 
 
 class MessageAttachmentResponse(BaseModel):
@@ -11,6 +18,7 @@ class MessageAttachmentResponse(BaseModel):
     size_bytes: int
     attachment_type: str
     download_url: str
+    rag_info: Optional[RagInfo] = None
 
 
 class AttachmentUploadResponse(BaseModel):
@@ -20,12 +28,15 @@ class AttachmentUploadResponse(BaseModel):
     size_bytes: int
     attachment_type: str
     download_url: str
+    rag_info: Optional[RagInfo] = None
+
 
 
 class ChatRequest(BaseModel):
     thread_id: uuid.UUID
     message: str = ""
     attachment_ids: list[uuid.UUID] = Field(default_factory=list)
+    response_mode: Literal["rag", "llm", "sql"] = "rag"
 
     @model_validator(mode="after")
     def validate_payload(self) -> "ChatRequest":
@@ -49,8 +60,6 @@ class ImageGenerationRequest(BaseModel):
 
 
 class ImageGenerationResponse(BaseModel):
-    url: str
-    filename: str
-    mime_type: str
+    attachment: MessageAttachmentResponse
     original_prompt: str
-    size_bytes: int
+    message_id: uuid.UUID | None = None
