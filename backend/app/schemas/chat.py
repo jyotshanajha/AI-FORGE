@@ -31,6 +31,9 @@ class AttachmentUploadResponse(BaseModel):
     rag_info: Optional[RagInfo] = None
 
 
+class GoogleDriveImportRequest(BaseModel):
+    google_drive_url_or_id: str = Field(..., min_length=3, max_length=2048)
+
 
 class ChatRequest(BaseModel):
     thread_id: uuid.UUID

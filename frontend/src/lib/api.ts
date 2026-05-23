@@ -13,6 +13,11 @@ import type {
 } from '../types/api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
+const DEFAULT_REQUEST_TIMEOUT_MS = 30000
+
+interface RequestOptions extends RequestInit {
+  timeoutMs?: number
+}
 
 const authResponseSchema = z.object({
   user: z.object({
@@ -81,17 +86,20 @@ export interface GeneratedImageResult {
   messageId?: string
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...fetchOptions } = options
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+  const timeout = setTimeout(() => {
+    controller.abort(new DOMException('Request timed out', 'TimeoutError'))
+  }, timeoutMs)
 
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
+      ...fetchOptions,
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        ...(options.headers ?? {}),
+        ...(fetchOptions.headers ?? {}),
       },
       signal: controller.signal,
     })
@@ -121,6 +129,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
 
     return (await response.json()) as T
+  } catch (error) {
+    if (controller.signal.aborted) {
+      const reason = controller.signal.reason
+      if (reason instanceof DOMException && reason.name === 'TimeoutError') {
+        throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s. Please try again.`)
+      }
+      throw new Error('Request was cancelled. Please retry.')
+    }
+
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('Network request failed')
   } finally {
     clearTimeout(timeout)
   }
@@ -295,13 +316,25 @@ export async function generateImage(prompt: string, threadId?: string): Promise<
 export async function streamResearchDigest(
   query: string,
   onToken: (event: ResearchDigestTokenEvent) => void,
-  maxPapers: number = 8,
+  options: {
+    maxPapers?: number
+    maxRounds?: number
+    papersPerRound?: number
+    signal?: AbortSignal
+  } = {},
 ): Promise<void> {
+  const { maxPapers = 6, maxRounds = 3, papersPerRound = 5, signal } = options
   const response = await fetch(`${API_BASE_URL}/agents/research-digest/stream`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, max_papers: maxPapers }),
+    body: JSON.stringify({
+      query,
+      max_papers: maxPapers,
+      max_rounds: maxRounds,
+      papers_per_round: papersPerRound,
+    }),
+    signal,
   })
 
   if (!response.ok || !response.body) {
@@ -330,8 +363,17 @@ export async function streamResearchDigest(
       if (data === '[DONE]') {
         return
       }
-      const parsed = JSON.parse(data) as ResearchDigestTokenEvent
-      onToken(parsed)
+      const parsed = JSON.parse(data) as Record<string, unknown>
+
+      if (typeof parsed.type === 'string') {
+        onToken(parsed as ResearchDigestTokenEvent)
+        continue
+      }
+
+      // Backward compatibility with token-only payloads.
+      if (typeof parsed.token === 'string') {
+        onToken({ type: 'token', token: parsed.token })
+      }
     }
   }
 }
@@ -344,6 +386,7 @@ export async function dataframeQuery(input: {
 }): Promise<DataframeQueryResponse> {
   const payload = await request<DataframeQueryResponse>('/agents/dataframe-query', {
     method: 'POST',
+    timeoutMs: 120000,
     body: JSON.stringify({
       question: input.question,
       attachment_id: input.attachmentId,

@@ -300,7 +300,7 @@ export default function ChatPage() {
           ) : mode === 'dataframe' ? (
             <DataframeQueryPanel />
           ) : mode === 'research' ? (
-            <ResearchDigestPanel />
+            <ResearchDigestPanel onBack={() => setMode('chat')} />
           ) : (
             <TicTacToePanel />
           )}

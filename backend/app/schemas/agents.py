@@ -5,7 +5,9 @@ from pydantic import BaseModel, Field, model_validator
 
 class ResearchDigestRequest(BaseModel):
     query: str = Field(..., min_length=3, max_length=400)
-    max_papers: int = Field(default=8, ge=3, le=20)
+    max_papers: int = Field(default=6, ge=3, le=20)   # minimum papers / evidence target
+    max_rounds: int = Field(default=3, ge=1, le=10)
+    papers_per_round: int = Field(default=5, ge=2, le=15)
 
 
 class DataframeQueryRequest(BaseModel):

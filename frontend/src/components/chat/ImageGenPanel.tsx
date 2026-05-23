@@ -105,7 +105,7 @@ export function ImageGenPanel({ threadId, onGenerated }: ImageGenPanelProps) {
               boxShadow: '0 12px 24px rgba(100, 80, 200, 0.42)',
             }}
           >
-            {isGenerating ? 'Generating…' : 'Generate  ⌘↵'}
+            {isGenerating ? 'Generating...' : 'Generate  ⌘↵'}
           </Button>
         </motion.div>
       </Box>

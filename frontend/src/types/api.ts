@@ -47,9 +47,33 @@ export interface ChatTokenEvent {
   token: string
 }
 
-export interface ResearchDigestTokenEvent {
-  token: string
-}
+export type ResearchDigestTokenEvent =
+  | { type: 'token'; token: string }
+  | { type: 'status'; message: string }
+  | {
+      type: 'meta'
+      query: string
+      papers_found: number
+      rounds_executed?: number
+      query_variants?: string[]
+    }
+  | {
+      type: 'evidence_decision'
+      enough_evidence: boolean
+      confidence: number
+      reason: string
+      papers_considered: number
+    }
+  | {
+      type: 'sources'
+      papers: Array<{
+        title: string
+        id: string
+        published: string
+        authors: string[]
+      }>
+    }
+  | { type: 'error'; message: string }
 
 export interface DataframeQueryResponse {
   answer: string

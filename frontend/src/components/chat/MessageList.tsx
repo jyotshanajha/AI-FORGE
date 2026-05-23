@@ -261,7 +261,7 @@ export function MessageList({ messages, isStreaming }: MessageListProps) {
                 />
               </Box>
               <Typography variant="caption" color="textSecondary">
-                Transmitting across orbit…
+                Transmitting across orbit...
               </Typography>
             </Box>
           </motion.div>

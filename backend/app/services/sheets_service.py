@@ -4,6 +4,7 @@ import re
 import gspread
 import pandas as pd
 from fastapi import HTTPException
+from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 
 from app.core.config import settings
 
@@ -51,21 +52,74 @@ def _build_gspread_client() -> gspread.Client:
     return gspread.service_account_from_dict(credentials)
 
 
+def _normalize_worksheet_title(value: str) -> str:
+    return re.sub(r"\s+", "", value).lower()
+
+
+def _resolve_worksheet(spreadsheet: gspread.Spreadsheet, worksheet_name: str | None) -> gspread.Worksheet:
+    if not worksheet_name:
+        worksheet = spreadsheet.get_worksheet(0)
+        if worksheet is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "worksheet_not_found", "message": "Spreadsheet has no worksheets"},
+            )
+        return worksheet
+
+    requested_name = worksheet_name.strip()
+    try:
+        return spreadsheet.worksheet(requested_name)
+    except WorksheetNotFound:
+        pass
+
+    worksheets = spreadsheet.worksheets()
+    normalized_requested = _normalize_worksheet_title(requested_name)
+    for worksheet in worksheets:
+        if _normalize_worksheet_title(worksheet.title) == normalized_requested:
+            return worksheet
+
+    available_names = ", ".join(worksheet.title for worksheet in worksheets) if worksheets else "(none)"
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "error": "worksheet_not_found",
+            "message": (
+                f"Worksheet '{worksheet_name}' not found. "
+                f"Available worksheets: {available_names}."
+            ),
+        },
+    )
+
+
 def load_sheet_as_dataframe(google_sheet_id_or_url: str, worksheet_name: str | None = None) -> pd.DataFrame:
     client = _build_gspread_client()
     sheet_key = _extract_google_sheet_key(google_sheet_id_or_url)
 
     try:
         spreadsheet = client.open_by_key(sheet_key)
-        worksheet = spreadsheet.worksheet(worksheet_name) if worksheet_name else spreadsheet.get_worksheet(0)
-        if worksheet is None:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "worksheet_not_found", "message": "Worksheet not found"},
-            )
+        worksheet = _resolve_worksheet(spreadsheet, worksheet_name)
         values = worksheet.get_all_values()
     except HTTPException:
         raise
+    except SpreadsheetNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "google_sheet_not_found",
+                "message": (
+                    "Google Sheet not found or not shared with the configured service account. "
+                    "Verify the spreadsheet ID and sharing permissions."
+                ),
+            },
+        ) from exc
+    except APIError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "google_sheet_api_error",
+                "message": f"Google Sheets API request failed: {exc}",
+            },
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,

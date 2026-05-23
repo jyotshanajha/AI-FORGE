@@ -73,16 +73,16 @@ async def google_callback(
     state: str = Query(default=""),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
     try:
         user = await AuthService.login_with_google_code(db, code)
     except Exception as exc:
         error_msg = str(exc).replace('"', '').replace("'", "")
         return RedirectResponse(
-            url=f"http://localhost:5173?error=google_auth_failed&message={error_msg}"
+            url=f"{frontend_url}?error=google_auth_failed&message={error_msg}"
         )
 
     token = AuthService.create_token(user)
-    frontend_url = "http://localhost:5173"
     response = RedirectResponse(url=frontend_url)
     response.set_cookie(
         key="access_token",

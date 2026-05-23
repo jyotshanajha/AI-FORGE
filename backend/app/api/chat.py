@@ -27,7 +27,11 @@ router = APIRouter()
 @router.post("/debug-test")
 async def debug_test(payload: dict = None) -> dict:
     """Debug endpoint to test routing."""
-    return {"status": "ok", "message": "Debug endpoint working"}
+    from app.core.config import settings
+    # Print only the first 100 chars for safety
+    value = settings.GOOGLE_SERVICE_ACCOUNT_JSON
+    preview = value[:100] + "..." if value and len(value) > 100 else value
+    return {"status": "ok", "GOOGLE_SERVICE_ACCOUNT_JSON": preview}
 
 
 @router.get("/{thread_id}/messages", response_model=list[MessageResponse])

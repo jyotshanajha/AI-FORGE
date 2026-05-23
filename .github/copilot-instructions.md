@@ -328,3 +328,36 @@ KI-06 — RAG answers not persisted If stream_rag_response does not receive db, 
 
 KI-07 — PowerShell multi-line Python commands Newlines in PowerShell -c "..." strings trigger multi-line input mode (>>), hanging indefinitely. → Use single-line Python one-liners or run each python -c "..." invocation separately.
 
+Pre-requisiste checklist for Project 9:
+
+Google Cloud
+
+Google Sheets API enabled in the Cloud Console for your project
+Google Drive API enabled in the same project
+A Service Account created with a downloaded JSON key file
+Service Account Access
+
+
+The target Google Sheet is explicitly shared with the service account email (e.g. name@project.iam.gserviceaccount.com) as at least Viewer
+The spreadsheet ID in the URL uses the correct characters (copy directly from the browser address bar — I and l are visually identical in most fonts)
+Python Dependencies
+
+gspread ≥ 6.x installed (gspread.authorize() is removed — use gspread.service_account_from_dict())
+google-auth installed
+pandas installed
+openpyxl installed
+tabulate installed (required by LangChain's Pandas agent for df.to_markdown())
+langchain-experimental installed
+Environment
+
+GOOGLE_SERVICE_ACCOUNT_JSON set to the full JSON string (not a file path)
+Network access to googleapis.com (not blocked by firewall/VPN)
+Quick validation test before wiring into the app:
+
+from app.services.sheets_service import load_sheet_as_dataframedf = load_sheet_as_dataframe("<your-sheet-url>")print(len(df))  # Must print a non-zero number
+
+Project 10 — Research Digest Agent
+Build a full-stack AI agent that autonomously searches arXiv, decides when it has enough evidence, and streams a structured research digest to the browser in real time.
+
+Project 11 — Tic Tac Toe Agent
+Create an application to play the tic tac toe game, containing an agent to play against you.

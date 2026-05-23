@@ -35,12 +35,14 @@ async def stream_research_digest(
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     async def event_generator() -> object:
-        async for chunk in ResearchDigestService.stream_digest(
+        async for event in ResearchDigestService.stream_digest(
             query=payload.query,
             max_papers=payload.max_papers,
+            max_rounds=payload.max_rounds,
+            papers_per_round=payload.papers_per_round,
             user_email=current_user.email,
         ):
-            yield f"data: {json.dumps({'token': chunk})}\n\n"
+            yield f"data: {json.dumps(event)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

@@ -222,7 +222,7 @@ export function InputBar({ onSend, responseMode, onResponseModeChange, disabled 
               ;(e.currentTarget.closest('form') as HTMLFormElement | null)?.requestSubmit()
             }
           }}
-          placeholder="Ask anything… (Enter to send, Shift+Enter for newline)"
+          placeholder="Ask anything... (Enter to send, Shift+Enter for newline)"
           disabled={disabled || isLoading || isUploading}
           variant="outlined"
           size="small"
